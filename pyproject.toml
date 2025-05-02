@@ -1,0 +1,21 @@
+[project]
+name = "curl-mcp"
+version = "0.1.0"
+description = "Simple MCP server for making HTTP requests"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastmcp>=0.1.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+curl-mcp = "curl:main"
+
+[tool.setuptools]
+packages = []
+py-modules = ["curl"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
