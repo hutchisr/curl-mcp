@@ -211,6 +211,42 @@ Response:
 }
 ```
 
+### oauth2_authorize_and_fetch_token
+
+Create an OAuth2 authorization URL, start a callback server, open browser, and automatically fetch token when the callback is received.
+
+Parameters:
+- client_id (required): OAuth2 client ID
+- authorization_url (required): Authorization endpoint URL
+- token_url (required): Token endpoint URL
+- redirect_uri (required): Redirect URI for the OAuth2 flow
+- client_secret: OAuth2 client secret (optional for public clients)
+- scope: List of scopes to request (default: ["openid"])
+- open_browser: Whether to automatically open the browser (default: true)
+- force: Whether to fetch a new token even if we already have one for this client_id (default: false)
+
+Example:
+```json
+{
+  "client_id": "your-client-id",
+  "client_secret": "your-client-secret",
+  "authorization_url": "https://example.com/oauth2/authorize",
+  "token_url": "https://example.com/oauth2/token",
+  "redirect_uri": "http://localhost:3001/callback",
+  "scope": ["profile", "email"],
+  "open_browser": true
+}
+```
+
+Response:
+```json
+{
+  "authorization_url": "https://example.com/oauth2/authorize?response_type=code&client_id=your-client-id&redirect_uri=http%3A%2F%2Flocalhost%3A3001%2Fcallback&scope=profile+email&state=abc123",
+  "state": "abc123",
+  "message": "Authorization URL opened in browser. Waiting for callback...",
+  "callback_server": "http://localhost:3001/callback"
+}
+```
 """
 
 
@@ -223,9 +259,7 @@ Response:
         client_secret: Optional[str] = None,
         scope: Optional[List[str]] = None,
         open_browser: bool = True,
-        port: int = 3001,
-        path: str = "/callback",
-        kwargs: Optional[Dict[str, Any]] = None,
+        force: bool = False
     ) -> str:
         """
         Create an OAuth2 authorization URL, start a callback server, open browser, and automatically fetch token.
@@ -238,13 +272,15 @@ Response:
             client_secret: OAuth2 client secret (optional for public clients)
             scope: List of scopes to request
             open_browser: Whether to automatically open the browser
-            port: Port to run the callback server on
-            path: Path for the callback endpoint
-            kwargs: Additional parameters to include in the authorization URL
+            force: Whether to reauthorize even if we already have a token
 
         Returns:
-            A JSON string containing the authorization URL and state
+            A JSON string containing the authorization URL and state or a string message if a token is already cached.
         """
+        if client_id in self.token_cache and not force:
+            logger.info(f"We already have a token for {client_id}")
+            return "We already have a token. Call again with force set to true to get a new one if required."
+
         logger.info(f"Starting OAuth2 flow with automatic token fetch for client {client_id}")
 
         if scope is None:
@@ -280,15 +316,9 @@ Response:
         )
 
         # Create authorization URL
-        if kwargs:
-            auth_url, state = oauth.authorization_url(
-                authorization_url,
-                **kwargs
-            )
-        else:
-            auth_url, state = oauth.authorization_url(
-                authorization_url
-            )
+        auth_url, state = oauth.authorization_url(
+            authorization_url
+        )
 
         # Store the request details for when the callback is received
         self.pending_oauth_requests[state] = {

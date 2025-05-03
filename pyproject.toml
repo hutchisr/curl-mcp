@@ -5,7 +5,7 @@ description = "Simple MCP server for making HTTP requests"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "fastmcp>=0.1.0",
+    "fastmcp>=2.2.6",
     "requests>=2.31.0",
     "requests-oauthlib>=1.3.1",
 ]
