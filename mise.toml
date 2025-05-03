@@ -4,3 +4,4 @@ uv = "latest"
 
 [env]
 _.python.venv = ".venv"
+OAUTHLIB_INSECURE_TRANSPORT = "1"
