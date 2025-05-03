@@ -15,7 +15,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 AUTHORIZATION_URL = os.getenv("AUTHORIZATION_URL")
 TOKEN_URL = os.getenv("TOKEN_URL")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
-SCOPES = os.getenv("SCOPES").split()
+SCOPES = os.getenv("SCOPES", "").split()
 API_URL = os.getenv("API_URL")
 
 async def main():
