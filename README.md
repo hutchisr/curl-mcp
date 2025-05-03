@@ -53,6 +53,8 @@ The OAuth2 authorization code flow involves the following steps:
 4. Make authenticated requests using `http_request` with the client_id parameter to use the cached token
    - If no client_id is specified but there's only one token in the cache, that token will be used automatically
 
+> **IMPORTANT**: Always include the same `client_id` in your `http_request` calls that you used with `oauth2_authorize_and_fetch_token`. Failing to include the `client_id` parameter may result in unauthorized requests if multiple tokens are cached.
+
 ## Example OAuth2 Flow
 
 ```python
@@ -79,7 +81,7 @@ api_result = await client.call_tool(
     {
         "url": "https://example.com/api/user",
         "method": "GET",
-        "client_id": "your-client-id"  # Use the client_id to use the cached token
+        "client_id": "your-client-id"  # IMPORTANT: Always include the same client_id used in oauth2_authorize_and_fetch_token
     }
 )
 ```

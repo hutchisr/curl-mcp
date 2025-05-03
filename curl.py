@@ -9,13 +9,12 @@ import os
 import threading
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Any, Callable, Dict, List, Optional, Union
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 from fastmcp import FastMCP
 from requests_oauthlib import OAuth2Session
-from oauthlib.oauth2 import WebApplicationClient
 
 # Configure logging
 logging.basicConfig(
@@ -167,6 +166,9 @@ This MCP server provides tools for making HTTP requests to external services, in
 
 Make an HTTP request to a specified URL.
 
+If oauth2_authorize_and_fetch_token has been used then a bearer token
+associated with the client_id will be cached in memory.
+
 Parameters:
 - url (required): The URL to send the request to
 - method: The HTTP method to use (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)
@@ -177,6 +179,8 @@ Parameters:
 - timeout: Request timeout in seconds (default: 30)
 - client_id: OAuth2 client ID to use for token lookup (if provided and token exists in cache)
             If not provided but there's only one token in the cache, that token will be used automatically
+            **IMPORTANT**: Always include the same client_id used in oauth2_authorize_and_fetch_token to ensure
+            the correct token is used, especially when multiple tokens are cached
 
 Example:
 ```json
@@ -243,6 +247,9 @@ Response:
         """
         logger.info(f"Starting OAuth2 flow with automatic token fetch for client {client_id}")
 
+        if scope is None:
+            scope = ["openid"]
+
         # Parse the redirect_uri to ensure it matches our callback server
         parsed_uri = urlparse(redirect_uri)
         callback_host = parsed_uri.hostname
@@ -262,7 +269,7 @@ Response:
                 else:
                     netloc_parts.append(str(actual_port))
                 parsed_parts[1] = ':'.join(netloc_parts)
-                redirect_uri = urlparse.urlunparse(parsed_parts)
+                redirect_uri = urlunparse(parsed_parts)
                 logger.info(f"Updated redirect_uri to use port {actual_port}: {redirect_uri}")
 
         # Create OAuth2 session
@@ -357,12 +364,7 @@ Response:
                     # Get the request details
                     request_details = outer_self.pending_oauth_requests[state]
 
-                    # Start a thread to fetch the token
-                    threading.Thread(
-                        target=outer_self._fetch_token_from_callback,
-                        args=(code, state, request_details),
-                        daemon=True
-                    ).start()
+                    outer_self._fetch_token_from_callback(code, state, request_details)
 
                     # Send a success message to the browser
                     self.wfile.write("""
@@ -455,21 +457,19 @@ Response:
 
             logger.info(f"Token successfully fetched and cached for client {client_id}")
             logger.info(f"Token type: {token_type}")
+            logger.info(f"Token value: {token.get('access_token', 'N/A')}")
             logger.info(f"Token expires in: {token.get('expires_in', 'N/A')} seconds")
             logger.info(f"Token scope: {token.get('scope', 'N/A')}")
-
+        finally:
             # Clean up
             if state in self.pending_oauth_requests:
                 del self.pending_oauth_requests[state]
-
-        except Exception as e:
-            logger.error(f"Error fetching token from callback: {str(e)}")
 
 def main():
     """Run the MCP server."""
     logger.info("Starting curl-mcp server...")
     server = CurlMCPServer()
-    # server.run(transport="sse", host="localhost", port=8080)
+    # server.run(transport="sse", host="localhost", port=9090)
     server.run()
 
 
