@@ -46,3 +46,6 @@ htmlcov/
 
 # Logs
 *.log
+
+mise.local.toml
+.mise.local.toml

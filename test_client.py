@@ -38,10 +38,8 @@ async def main():
         result_text = result[0].text
         try:
             result_json = json.loads(result_text)
-            # The result is a JSON string inside a JSON object
-            inner_json = json.loads(result_json["body"])
             print("\nHTTP request result:")
-            print(json.dumps(inner_json, indent=2))
+            print(json.dumps(result_json, indent=2))
         except (json.JSONDecodeError, KeyError):
             print("\nHTTP request result (not JSON):")
             print(result_text)
@@ -62,10 +60,8 @@ async def main():
         post_result_text = post_result[0].text
         try:
             post_result_json = json.loads(post_result_text)
-            # The result is a JSON string inside a JSON object
-            inner_json = json.loads(post_result_json["body"])
             print("\nPOST request result:")
-            print(json.dumps(inner_json, indent=2))
+            print(json.dumps(post_result_json, indent=2))
         except (json.JSONDecodeError, KeyError):
             print("\nPOST request result (not JSON):")
             print(post_result_text)

@@ -74,7 +74,7 @@ class CurlMCPServer(FastMCP):
         json: Optional[Union[Dict[str, Any], List[Any]]] = None,
         timeout: float = 30,
         client_id: Optional[str] = None,
-    ) -> str:
+    ) -> dict:
         """
         Make an HTTP request to the specified URL.
 
@@ -134,8 +134,7 @@ class CurlMCPServer(FastMCP):
 
             # Try to parse response as JSON
             try:
-                response_json = response.json()
-                response_body = json_module.dumps(response_json, indent=2)
+                response_body = response.json()
             except ValueError:
                 # Not JSON, return text
                 response_body = response.text
@@ -146,11 +145,11 @@ class CurlMCPServer(FastMCP):
                 "body": response_body,
             }
 
-            return json_module.dumps(result, indent=2)
+            return result
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Request failed: {str(e)}")
-            return json_module.dumps({"error": str(e)}, indent=2)
+            return {"error": str(e)}
 
 
     def get_readme(self) -> str:
@@ -260,7 +259,7 @@ Response:
         scope: Optional[List[str]] = None,
         open_browser: bool = True,
         force: bool = False
-    ) -> str:
+    ) -> dict:
         """
         Create an OAuth2 authorization URL, start a callback server, open browser, and automatically fetch token.
 
@@ -340,7 +339,7 @@ Response:
             "callback_server": f"http://{callback_host}:{callback_port}{callback_path}"
         }
 
-        return json_module.dumps(result, indent=2)
+        return result
 
     def _start_callback_server(self, port: int, max_retries: int = 5) -> int:
         """

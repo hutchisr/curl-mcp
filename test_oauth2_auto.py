@@ -3,20 +3,20 @@
 Test client for the automatic OAuth2 authorization code flow in curl-mcp.
 This version uses the callback server to automatically fetch the token.
 """
-
+import os
 import asyncio
 import json
 import time
 from fastmcp import Client
 
 # Replace these with your OAuth2 provider details
-CLIENT_ID = "mojito"
-CLIENT_SECRET = ""
-AUTHORIZATION_URL = "http://localhost:5556/dex/auth"
-TOKEN_URL = "http://localhost:5556/dex/token"
-REDIRECT_URI = "http://localhost:3001/callback"
-SCOPES = ["openid", "profile", "email"]
-API_URL = "http://localhost:3000/api/mojito/v1/users/me"
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+AUTHORIZATION_URL = os.getenv("AUTHORIZATION_URL")
+TOKEN_URL = os.getenv("TOKEN_URL")
+REDIRECT_URI = os.getenv("REDIRECT_URI")
+SCOPES = os.getenv("SCOPES").split()
+API_URL = os.getenv("API_URL")
 
 async def main():
     """Run the OAuth2 test client with automatic token fetching."""
