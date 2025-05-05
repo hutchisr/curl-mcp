@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Simple MCP server for making HTTP requests.
 """
@@ -22,8 +21,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("curl-mcp")
-
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 class CurlMCPServer(FastMCP):
     """MCP server that provides HTTP request capabilities."""
@@ -288,11 +285,11 @@ Response:
         # Parse the redirect_uri to ensure it matches our callback server
         parsed_uri = urlparse(redirect_uri)
         callback_host = parsed_uri.hostname
-        callback_port = parsed_uri.port or 80
+        callback_port = parsed_uri.port
         callback_path = parsed_uri.path
 
         # Start the callback server if not already running
-        if self.callback_server is None:
+        if self.callback_server is None and callback_host and callback_port:
             actual_port = self._start_callback_server(callback_port)
 
             # If the actual port is different from the requested port, update the redirect_uri
