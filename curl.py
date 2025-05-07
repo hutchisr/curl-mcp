@@ -6,16 +6,14 @@ import atexit
 import json as json_module
 import logging
 import os
-import threading
+import asyncio
 import webbrowser
 from dataclasses import dataclass, field
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import parse_qs, urlparse, urlunparse
 
-import requests
+import httpx
 from fastmcp import FastMCP
-from requests_oauthlib import OAuth2Session
 
 # Configure logging
 logging.basicConfig(
@@ -39,8 +37,8 @@ class State:
     token_cache: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # OAuth2 callback server
-    callback_server: Optional[HTTPServer] = None
-    callback_server_thread: Optional[threading.Thread] = None
+    callback_server: Optional[Any] = None
+    callback_server_task: Optional[asyncio.Task] = None
 
     # Pending OAuth requests
     # Structure: {state: {client_id, token_url, etc.}}
@@ -55,7 +53,7 @@ app_state = State()
     name="http_request",
     description="Make an HTTP request to a specified URL"
 )
-def http_request(
+async def http_request(
     url: str,
     method: str = "GET",
     headers: Optional[Dict[str, str]] = None,
@@ -112,32 +110,33 @@ def http_request(
             logger.info(f"Failsafe: Using the only cached token (client {auto_client_id})")
 
     try:
-        response = requests.request(
-            method=method,
-            url=url,
-            headers=headers,
-            params=params,
-            data=data,
-            json=json,
-            timeout=timeout,
-        )
+        async with httpx.AsyncClient() as client:
+            response = await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=data,
+                json=json,
+                timeout=timeout,
+            )
 
-        # Try to parse response as JSON
-        try:
-            response_body = response.json()
-        except ValueError:
-            # Not JSON, return text
-            response_body = response.text
+            # Try to parse response as JSON
+            try:
+                response_body = response.json()
+            except ValueError:
+                # Not JSON, return text
+                response_body = response.text
 
-        result = {
-            "status_code": response.status_code,
-            "headers": dict(response.headers),
-            "body": response_body,
-        }
+            result = {
+                "status_code": response.status_code,
+                "headers": dict(response.headers),
+                "body": response_body,
+            }
 
-        return result
+            return result
 
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         logger.error(f"Request failed: {str(e)}")
         return {"error": str(e)}
 
@@ -247,7 +246,7 @@ Response:
     name="oauth2_authorize_and_fetch_token",
     description="Create an OAuth2 authorization URL, open browser, and automatically fetch token"
 )
-def oauth2_authorize_and_fetch_token(
+async def oauth2_authorize_and_fetch_token(
     client_id: str,
     authorization_url: str,
     token_url: str,
@@ -290,7 +289,7 @@ def oauth2_authorize_and_fetch_token(
 
     # Start the callback server if not already running
     if app_state.callback_server is None and callback_host and callback_port:
-        actual_port = _start_callback_server(callback_port)
+        actual_port = await _start_callback_server(callback_port)
 
         # If the actual port is different from the requested port, update the redirect_uri
         if actual_port != callback_port:
@@ -304,17 +303,23 @@ def oauth2_authorize_and_fetch_token(
             redirect_uri = urlunparse(parsed_parts)
             logger.info(f"Updated redirect_uri to use port {actual_port}: {redirect_uri}")
 
-    # Create OAuth2 session
-    oauth = OAuth2Session(
-        client_id=client_id,
-        redirect_uri=redirect_uri,
-        scope=scope,
-    )
+    # Generate a random state
+    import secrets
+    state = secrets.token_urlsafe(16)
 
-    # Create authorization URL
-    auth_url, state = oauth.authorization_url(
-        authorization_url
-    )
+    # Create authorization URL with parameters
+    from urllib.parse import urlencode
+    params = {
+        'response_type': 'code',
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'state': state,
+    }
+
+    if scope:
+        params['scope'] = ' '.join(scope)
+
+    auth_url = f"{authorization_url}?{urlencode(params)}"
 
     # Store the request details for when the callback is received
     app_state.pending_oauth_requests[state] = {
@@ -339,7 +344,7 @@ def oauth2_authorize_and_fetch_token(
     return result
 
 
-def _start_callback_server(port: int, max_retries: int = 5) -> int:
+async def _start_callback_server(port: int, max_retries: int = 5) -> int:
     """
     Start an HTTP server to handle OAuth2 callbacks.
 
@@ -350,76 +355,92 @@ def _start_callback_server(port: int, max_retries: int = 5) -> int:
     Returns:
         The port number that the server is running on
     """
-    # Create a request handler that will capture the authorization code
-    class OAuthCallbackHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            try:
-                # Parse the query parameters
-                parsed_url = urlparse(self.path)
-                query_params = parse_qs(parsed_url.query)
+    # Create a request handler that will process the callback
+    async def handle_callback(request):
+        from aiohttp import web
 
-                logger.info(f"Received callback: {self.path}")
-                logger.info(f"Query parameters: {query_params}")
+        try:
+            # Parse the query parameters
+            query_params = request.query
 
-                # Extract the authorization code and state
-                code = query_params.get("code", [""])[0]
-                state = query_params.get("state", [""])[0]
+            logger.info(f"Received callback: {request.path_qs}")
+            logger.info(f"Query parameters: {query_params}")
 
+            # Extract the authorization code and state
+            code = query_params.get("code", "")
+            state = query_params.get("state", "")
+
+            if code:
                 logger.info(f"Extracted code: {code[:5]}... and state: {state}")
 
-                # Send a response to the browser
-                self.send_response(200)
-                self.send_header("Content-type", "text/html")
-                self.end_headers()
+            # Prepare response
+            if not code or not state:
+                error_message = "Error: Missing code or state parameter"
+                logger.error(error_message)
+                return web.Response(
+                    text=f"<html><body><h1>{error_message}</h1></body></html>",
+                    content_type="text/html"
+                )
 
-                if not code or not state:
-                    error_message = "Error: Missing code or state parameter"
-                    logger.error(error_message)
-                    self.wfile.write(f"<html><body><h1>{error_message}</h1></body></html>".encode())
-                    return
+            # Check if we have a pending request for this state
+            if state not in app_state.pending_oauth_requests:
+                error_message = f"Error: No pending OAuth request found for state: {state}"
+                logger.error(error_message)
+                logger.error(f"Available states: {list(app_state.pending_oauth_requests.keys())}")
+                return web.Response(
+                    text=f"<html><body><h1>{error_message}</h1></body></html>",
+                    content_type="text/html"
+                )
 
-                # Check if we have a pending request for this state
-                if state not in app_state.pending_oauth_requests:
-                    error_message = f"Error: No pending OAuth request found for state: {state}"
-                    logger.error(error_message)
-                    logger.error(f"Available states: {list(app_state.pending_oauth_requests.keys())}")
-                    self.wfile.write(f"<html><body><h1>{error_message}</h1></body></html>".encode())
-                    return
+            # Get the request details
+            request_details = app_state.pending_oauth_requests[state]
 
-                # Get the request details
-                request_details = app_state.pending_oauth_requests[state]
+            # Process the token asynchronously
+            await _fetch_token_from_callback(code, state, request_details)
 
-                _fetch_token_from_callback(code, state, request_details)
-
-                # Send a success message to the browser
-                self.wfile.write("""
+            # Send a success message to the browser
+            return web.Response(
+                text="""
                 <html>
                     <body>
                         <h1>Authorization Successful</h1>
                         <p>You can close this window now.</p>
                     </body>
                 </html>
-                """.encode())
+                """,
+                content_type="text/html"
+            )
 
-            except Exception as e:
-                logger.error(f"Error handling callback: {str(e)}")
-                self.send_response(500)
-                self.send_header("Content-type", "text/html")
-                self.end_headers()
-                self.wfile.write(f"<html><body><h1>Error: {str(e)}</h1></body></html>".encode())
+        except Exception as e:
+            logger.error(f"Error handling callback: {str(e)}")
+            return web.Response(
+                text=f"<html><body><h1>Error: {str(e)}</h1></body></html>",
+                content_type="text/html",
+                status=500
+            )
 
     # Try to start the server, incrementing the port number if it's already in use
+    from aiohttp import web
     current_port = port
+
     for attempt in range(max_retries):
         try:
-            app_state.callback_server = HTTPServer(("localhost", current_port), OAuthCallbackHandler)
-            app_state.callback_server_thread = threading.Thread(
-                target=app_state.callback_server.serve_forever,
-                daemon=True
-            )
-            app_state.callback_server_thread.start()
+            app = web.Application()
+            app.router.add_get('/{path:.*}', handle_callback)
+
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, 'localhost', current_port)
+            await site.start()
+
+            app_state.callback_server = {
+                'runner': runner,
+                'site': site
+            }
+
             logger.info(f"OAuth2 callback server started on port {current_port}")
             return current_port
+
         except OSError as e:
             if e.errno == 48:  # Address already in use
                 logger.warning(f"Port {current_port} is already in use, trying port {current_port + 1}")
@@ -434,7 +455,7 @@ def _start_callback_server(port: int, max_retries: int = 5) -> int:
     raise RuntimeError(error_msg)
 
 
-def _fetch_token_from_callback(code: str, state: str, request_details: Dict[str, Any]) -> None:
+async def _fetch_token_from_callback(code: str, state: str, request_details: Dict[str, Any]) -> None:
     """
     Fetch an OAuth2 token using the authorization code from the callback.
 
@@ -455,24 +476,33 @@ def _fetch_token_from_callback(code: str, state: str, request_details: Dict[str,
         logger.info(f"Redirect URI: {redirect_uri}")
         logger.info(f"Using client secret: {bool(client_secret)}")
 
-        # Create OAuth2 session
-        oauth = OAuth2Session(
-            client_id=client_id,
-            redirect_uri=redirect_uri,
-            state=state,
-        )
+        # Prepare token request data
+        data = {
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': redirect_uri,
+            'client_id': client_id,
+        }
 
-        # Fetch token
-        fetch_kwargs = {"code": code}
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        }
 
         # Add client_secret if provided
         if client_secret:
-            fetch_kwargs["client_secret"] = client_secret
+            data['client_secret'] = client_secret
 
-        token = oauth.fetch_token(
-            token_url=token_url,
-            **fetch_kwargs
-        )
+        # Make the token request
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                token_url,
+                data=data,
+                headers=headers
+            )
+
+            response.raise_for_status()
+            token = response.json()
 
         # Cache the token
         token_type = token.get("token_type", "Bearer")
@@ -491,23 +521,33 @@ def _fetch_token_from_callback(code: str, state: str, request_details: Dict[str,
         if state in app_state.pending_oauth_requests:
             del app_state.pending_oauth_requests[state]
 
-def cleanup():
+async def cleanup():
     """Clean up the callback server and token cache."""
     if app_state.callback_server:
-        app_state.callback_server.shutdown()
-        app_state.callback_server.server_close()
+        if 'runner' in app_state.callback_server:
+            await app_state.callback_server['runner'].cleanup()
         app_state.callback_server = None
         logger.info("Callback server shut down successfully")
-    if app_state.callback_server_thread:
-        app_state.callback_server_thread.join()
-        app_state.callback_server_thread = None
-        logger.info("Callback server thread joined successfully")
+    if app_state.callback_server_task:
+        app_state.callback_server_task.cancel()
+        try:
+            await app_state.callback_server_task
+        except asyncio.CancelledError:
+            pass
+        app_state.callback_server_task = None
+        logger.info("Callback server task cancelled successfully")
 
 
 def main():
     """Run the MCP server."""
     logger.info("Starting curl-mcp server...")
-    atexit.register(cleanup)
+
+    # Register cleanup to be run at exit
+    async def async_cleanup():
+        await cleanup()
+
+    atexit.register(lambda: asyncio.run(async_cleanup()))
+
     # mcp.run(transport="sse", host="localhost", port=9090)
     mcp.run()
 

@@ -3,11 +3,11 @@ name = "curl-mcp"
 version = "0.1.0"
 description = "Simple MCP server for making HTTP requests"
 readme = "README.md"
-requires-python = "==3.10.*"
+requires-python = ">=3.10"
 dependencies = [
-    "requests[socks]>=2.31.0",
-    "requests-oauthlib>=1.3.1",
+    "httpx[socks]>=0.24.0",
     "fastmcp>=2.2.10",
+    "aiohttp>=3.8.0",
 ]
 
 [project.scripts]
@@ -20,3 +20,8 @@ py-modules = ["curl"]
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "ipython>=8.36.0",
+]

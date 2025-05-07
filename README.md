@@ -1,6 +1,6 @@
 # curl-mcp
 
-A simple MCP (Model Context Protocol) server for making HTTP requests, including OAuth2 authorization code flow support.
+A simple MCP (Model Context Protocol) server for making HTTP requests, including OAuth2 authorization code flow support. Uses httpx for HTTP requests and async/await for improved performance.
 
 ## Installation
 
@@ -34,11 +34,11 @@ python test_client.py
 
 ### http_request
 
-Make an HTTP request to a specified URL.
+Make an asynchronous HTTP request to a specified URL using httpx.
 
 ### oauth2_authorize_and_fetch_token
 
-Create an OAuth2 authorization URL, start a callback server, open browser, and automatically fetch token when the callback is received.
+Create an OAuth2 authorization URL, start an async callback server, open browser, and automatically fetch token when the callback is received.
 
 
 ## OAuth2 Authorization Code Flow
