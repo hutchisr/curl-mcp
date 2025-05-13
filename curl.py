@@ -57,9 +57,9 @@ async def http_request(
     url: str,
     method: str = "GET",
     headers: Optional[Dict[str, str]] = None,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Union[Dict[str, Any], str]] = None,
-    json: Optional[Union[Dict[str, Any], List[Any]]] = None,
+    params: Optional[Dict[str, Any] | str] = None,
+    data: Optional[Dict[str, Any] | str] = None,
+    json: Optional[Dict[str, Any] | List[Any] | str] = None,
     timeout: float = 30,
     client_id: Optional[str] = None,
 ) -> dict:
@@ -85,6 +85,23 @@ async def http_request(
     if headers is None:
         headers = {}
 
+    if isinstance(params, str):
+        try:
+            params = json_module.loads(params)
+        except json_module.JSONDecodeError:
+            logger.error(f"Failed to parse params: {params}")
+            return {"error": "Invalid params format"}
+    if isinstance(json, str):
+        try:
+            json = json_module.loads(json)
+        except json_module.JSONDecodeError:
+            logger.error(f"Failed to parse JSON: {json}")
+            return {"error": "Invalid JSON format"}
+    if isinstance(data, str):
+        try:
+            data = json_module.loads(data)
+        except json_module.JSONDecodeError:
+            pass
     # Use cached token if client_id is provided and token exists in cache
     if client_id and client_id in app_state.token_cache:
         cached_data = app_state.token_cache[client_id]
@@ -252,7 +269,7 @@ async def oauth2_authorize_and_fetch_token(
     token_url: str,
     redirect_uri: str,
     client_secret: Optional[str] = None,
-    scope: Optional[List[str]] = None,
+    scope: Optional[List[str] | str] = None,
     open_browser: bool = True,
     force: bool = False
 ) -> dict:
@@ -280,6 +297,11 @@ async def oauth2_authorize_and_fetch_token(
 
     if scope is None:
         scope = ["openid"]
+    elif isinstance(scope, str):
+        try:
+            scope = json_module.loads(scope)
+        except json_module.JSONDecodeError:
+            scope = scope.split(" ")
 
     # Parse the redirect_uri to ensure it matches our callback server
     parsed_uri = urlparse(redirect_uri)
